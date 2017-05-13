@@ -1,0 +1,31 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp1.1</TargetFramework>
+    <Authors>Ramon de Klein &lt;mail@ramondeklein.nl&gt;</Authors>
+    <Company />
+    <Product>Developer proxy</Product>
+    <Description>Developer proxy to expose local ports to the outside world and to provide MitM SSL posibilities.</Description>
+    <Copyright>Copyright (C) 2017 by Ramon de Klein &lt;mail@ramondeklein.nl&gt;</Copyright>
+    <PackageLicenseUrl />
+    <PackageTags />
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="DeveloperProxy\**" />
+    <EmbeddedResource Remove="DeveloperProxy\**" />
+    <None Remove="DeveloperProxy\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove=".gitattributes" />
+    <None Remove=".gitignore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.CommandLineUtils" Version="1.1.1" />
+    <PackageReference Include="System.Net.NetworkInformation" Version="4.3.0" />
+  </ItemGroup>
+
+</Project>
