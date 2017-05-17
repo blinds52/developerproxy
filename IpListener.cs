@@ -14,13 +14,15 @@ namespace DeveloperProxy
         private readonly TcpListener _tcpListener;
         private readonly string _remoteHost;
         private readonly int _remotePort;
+        private readonly string _sslIdentification;
         private readonly CancellationTokenSource _ctsStop = new CancellationTokenSource();
 
-        public IpListener(IPEndPoint localEndPoint, string remoteHost, int remotePort)
+        public IpListener(IPEndPoint localEndPoint, string remoteHost, int remotePort, string sslIdentification = null)
         {
             _tcpListener = new TcpListener(localEndPoint);
             _remoteHost = remoteHost;
             _remotePort = remotePort;
+            _sslIdentification = sslIdentification;
         }
 
         public bool DecryptSsl { get; set; }
@@ -57,14 +59,25 @@ namespace DeveloperProxy
         {
             const int copyBlockSize = 64 * 1024;
 
+            // Log the connection that we have received
+            Console.WriteLine($"[{socket.LocalEndPoint}] - Accepted connection.");
+            var swConnection = Stopwatch.StartNew();
+                    
             // Obtain both streams
-            using (Stream localStream = new NetworkStream(socket, true))
+            using (var networkStream = new NetworkStream(socket, true))
             {
+                Stream localStream;
+
                 // Encrypt use SSL
                 if (Certificate != null)
                 {
-                    var localSslStream = new SslStream(localStream);
+                    var localSslStream = new SslStream(networkStream);
                     await localSslStream.AuthenticateAsServerAsync(Certificate).ConfigureAwait(false);
+                    localStream = localSslStream;
+                }
+                else
+                {
+                    localStream = networkStream;
                 }
 
                 // Connect to the remote endpoint
@@ -77,6 +90,9 @@ namespace DeveloperProxy
                     await tcpClient.ConnectAsync(_remoteHost, _remotePort).ConfigureAwait(false);
                     var remoteStream = (Stream)tcpClient.GetStream();
 
+                    // We're connected
+                    Console.WriteLine($"[{socket.LocalEndPoint}] - Connected to {_remoteHost}:{_remotePort} ({swConnection.ElapsedMilliseconds}ms)");
+
                     if (DecryptSsl)
                     {
                         // Create the SSL stream with certificate validation
@@ -87,19 +103,29 @@ namespace DeveloperProxy
                                 return true;
 
                             // Log warning
-                            Console.WriteLine($"Certificate with subject '{certificate.Subject}' has error {errors}.");
+                            Console.WriteLine($"[{socket.LocalEndPoint}] - Certificate with subject '{certificate.Subject}' has error {errors}.");
                             return IgnoreCertificateErrors;
                         });
-                        await remoteSslStream.AuthenticateAsClientAsync(_remoteHost);
+                        await remoteSslStream.AuthenticateAsClientAsync(_sslIdentification ?? _remoteHost);
 
                         // Use the SSL stream
                         remoteStream = remoteSslStream;
                     }
 
                     // Wait until the streams have completed
+                    try
+                    {
                     await Task.WhenAny(
                         localStream.CopyToAsync(remoteStream, copyBlockSize, cancellationToken),
                         remoteStream.CopyToAsync(localStream, copyBlockSize, cancellationToken)).ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        // Expected to fail sometimes
+                    }
+
+                    // Log warning
+                    Console.WriteLine($"[{socket.LocalEndPoint}] - Closed connection ({swConnection.ElapsedMilliseconds}ms).");
                 }
             }
         }

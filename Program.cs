@@ -27,6 +27,7 @@ namespace DeveloperProxy
             var optionListenAll = app.Option("-a|--listen-all", "Listen on all IP endpoints.", CommandOptionType.NoValue);
             var optionListenEndpoint = app.Option("-e|--listen-endpoint<ip-address>", "Listen on the specific IP endpoint", CommandOptionType.MultipleValue);
             var optionDecryptSsl = app.Option("-d|--decrypt-ssl", "Decrypt the remote SSL stream", CommandOptionType.NoValue);
+            var optionSslIdentification = app.Option("-s|--ssl-identification", "Decrypt the remote SSL stream", CommandOptionType.SingleValue);
             var optionIgnoreCertError = app.Option("-i|--ignore-certificate-errors", "Ignore any certificate errors", CommandOptionType.NoValue);
             var optionUseCertificate = app.Option("-c|--use-certificate", "Use the specified certificate", CommandOptionType.SingleValue);
             var optionCertificatePassword = app.Option("--certificate-password", "Use the specified certificate password", CommandOptionType.SingleValue);
@@ -48,6 +49,7 @@ namespace DeveloperProxy
                 var localPort = optionLocalPort.HasValue() ? int.Parse(optionLocalPort.Value()) : 0;
                 var host = optionHost.HasValue() ? optionHost.Value() : null;
                 var remotePort = optionRemotePort.HasValue() ? int.Parse(optionRemotePort.Value()) : 0;
+                var sslIdentification =  optionSslIdentification.HasValue() ?  optionSslIdentification.Value() : null;
 
                 // Load the certificate (if specified)
                 X509Certificate2 certificate = null;
@@ -60,7 +62,7 @@ namespace DeveloperProxy
                 }
 
                 // Create all the listeners
-                var listeners = ipAddresses.Select(ip => new IpListener(new IPEndPoint(ip, localPort), host, remotePort)
+                var listeners = ipAddresses.Select(ip => new IpListener(new IPEndPoint(ip, localPort), host, remotePort, sslIdentification)
                 {
                     DecryptSsl = optionDecryptSsl.HasValue(),
                     IgnoreCertificateErrors = optionIgnoreCertError.HasValue(),
