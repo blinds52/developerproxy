@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>netcoreapp1.1</TargetFramework>
+    <TargetFramework>netcoreapp2.0</TargetFramework>
     <Authors>Ramon de Klein &lt;mail@ramondeklein.nl&gt;</Authors>
     <Company />
     <Product>Developer proxy</Product>
@@ -10,6 +10,10 @@
     <Copyright>Copyright (C) 2017 by Ramon de Klein &lt;mail@ramondeklein.nl&gt;</Copyright>
     <PackageLicenseUrl />
     <PackageTags />
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
+    <DefineConstants>TRACE;DEBUG;NETCOREAPP2_0</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
