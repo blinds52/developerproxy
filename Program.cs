@@ -21,7 +21,7 @@ namespace DeveloperProxy
             };
 
             // Specify the help option
-            app.HelpOption("-?|-h|--help");
+            app.HelpOption("-?|--help");
 
             // Add some options
             var optionListenAll = app.Option("-a|--listen-all", "Listen on all IP endpoints.", CommandOptionType.NoValue);
@@ -47,7 +47,7 @@ namespace DeveloperProxy
 
                 // Determine the endpoints
                 var localPort = optionLocalPort.HasValue() ? int.Parse(optionLocalPort.Value()) : 0;
-                var host = optionHost.HasValue() ? optionHost.Value() : null;
+                var host = optionHost.HasValue() ? optionHost.Value() : "localhost";
                 var remotePort = optionRemotePort.HasValue() ? int.Parse(optionRemotePort.Value()) : 0;
                 var sslIdentification =  optionSslIdentification.HasValue() ?  optionSslIdentification.Value() : null;
 

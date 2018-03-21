@@ -87,9 +87,18 @@ namespace DeveloperProxy
                     // Dispose the TCP client when the operation is cancelled
                     cancellationToken.Register(() => tcpClient.Dispose());
 
-                    // Attempt to connect
-                    await tcpClient.ConnectAsync(_remoteHost, _remotePort).ConfigureAwait(false);
-                    var remoteStream = (Stream)tcpClient.GetStream();
+                    Stream remoteStream;
+                    try
+                    {
+                        // Attempt to connect
+                        await tcpClient.ConnectAsync(_remoteHost, _remotePort).ConfigureAwait(false);
+                        remoteStream = (Stream)tcpClient.GetStream();
+                    }
+                    catch (Exception exc)
+                    {
+                        Console.WriteLine($"[{socket.LocalEndPoint}] - Unable to connect to {_remoteHost}:{_remotePort} ({swConnection.ElapsedMilliseconds}ms): {exc.Message}");
+                        return;
+                    }
 
                     // We're connected
                     Console.WriteLine($"[{socket.LocalEndPoint}] - Connected to {_remoteHost}:{_remotePort} ({swConnection.ElapsedMilliseconds}ms)");
