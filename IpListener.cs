@@ -12,17 +12,19 @@ namespace DeveloperProxy
 {
     public class IpListener : IDisposable
     {
+        private readonly object _sync = new object();
         private readonly TcpListener _tcpListener;
-        private readonly string _remoteHost;
-        private readonly int _remotePort;
+        private readonly HostAndPort[] _remoteHosts;
+        private readonly TimeSpan _connectTimeout;
         private readonly string _sslIdentification;
         private readonly CancellationTokenSource _ctsStop = new CancellationTokenSource();
+        private int _hostIndex;
 
-        public IpListener(IPEndPoint localEndPoint, string remoteHost, int remotePort, string sslIdentification = null)
+        public IpListener(IPEndPoint localEndPoint, HostAndPort[] remoteHosts, TimeSpan connectTimeout, string sslIdentification = null)
         {
             _tcpListener = new TcpListener(localEndPoint);
-            _remoteHost = remoteHost;
-            _remotePort = remotePort;
+            _remoteHosts = remoteHosts;
+            _connectTimeout = connectTimeout;
             _sslIdentification = sslIdentification;
         }
 
@@ -56,14 +58,76 @@ namespace DeveloperProxy
             }
         }
 
+        private async Task<Stream> ConnectAsync(Socket socket, CancellationToken cancellationToken)
+        {
+            int baseHostIndex;
+            lock (_sync)
+            {
+                baseHostIndex = _hostIndex++ % _remoteHosts.Length;
+            }
+
+            for (var i = 0; i < _remoteHosts.Length; ++i)
+            {
+                var host = _remoteHosts[(baseHostIndex + i) % _remoteHosts.Length];
+
+                var tcpClient = new TcpClient();
+                using (var timeoutCancellationTokenSource = new CancellationTokenSource(_connectTimeout))
+                using (var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(timeoutCancellationTokenSource.Token, cancellationToken))
+                using (linkedTokenSource.Token.Register(() => tcpClient.Dispose()))
+                {
+                    try
+                    {
+                        await tcpClient.ConnectAsync(host.Hostname, host.Port).ConfigureAwait(false);
+                        Console.WriteLine($"[{socket.RemoteEndPoint} -> {socket.LocalEndPoint}] - Connected to {host}");
+
+                        var remoteStream = (Stream) tcpClient.GetStream();
+                        if (DecryptSsl)
+                        {
+                            // Create the SSL stream with certificate validation
+                            var remoteSslStream = new SslStream(remoteStream, false,
+                                (sender, certificate, chain, errors) =>
+                                {
+                                    // No need for checking if there are no errors
+                                    if (errors == SslPolicyErrors.None)
+                                        return true;
+
+                                    // Log warning
+                                    Console.WriteLine($"[{socket.RemoteEndPoint} -> {socket.LocalEndPoint}] - Certificate with subject '{certificate.Subject}' has error {errors}.");
+                                    return IgnoreCertificateErrors;
+                                });
+                            await remoteSslStream.AuthenticateAsClientAsync(_sslIdentification ?? host.Hostname);
+
+                            // Use the SSL stream
+                            remoteStream = remoteSslStream;
+                        }
+
+                        return remoteStream;
+                    }
+                    catch (Exception exc) when (!timeoutCancellationTokenSource.IsCancellationRequested)
+                    {
+                        Console.WriteLine($"[{socket.RemoteEndPoint} -> {socket.LocalEndPoint}] - Unable to connect to {host}: {exc.Message}");
+                        tcpClient.Dispose();
+                    }
+                    catch
+                    {
+                        Console.WriteLine($"[{socket.RemoteEndPoint} -> {socket.LocalEndPoint}] - Timeout while connecting to '{host}' within {Math.Round(_connectTimeout.TotalMilliseconds)}ms");
+                        tcpClient.Dispose();
+                    }
+                }
+            }
+
+            Console.WriteLine($"[{socket.LocalEndPoint}] - Cannot find a host to connect to.");
+            return null;
+        }
+
         private async void HandleConnection(Socket socket, CancellationToken cancellationToken)
         {
             const int copyBlockSize = 64 * 1024;
 
             // Log the connection that we have received
-            Console.WriteLine($"[{socket.LocalEndPoint}] - Accepted connection.");
+            Console.WriteLine($"[{socket.RemoteEndPoint} -> {socket.LocalEndPoint}] - Accepted connection.");
             var swConnection = Stopwatch.StartNew();
-                    
+
             // Obtain both streams
             using (var networkStream = new NetworkStream(socket, true))
             {
@@ -82,61 +146,28 @@ namespace DeveloperProxy
                 }
 
                 // Connect to the remote endpoint
-                using (var tcpClient = new TcpClient())
+                var remoteStream = await ConnectAsync(socket, cancellationToken).ConfigureAwait(false);
+                if (remoteStream == null)
+                    return;
+
+                // Wait until the streams have completed
+                try
                 {
-                    // Dispose the TCP client when the operation is cancelled
-                    cancellationToken.Register(() => tcpClient.Dispose());
-
-                    Stream remoteStream;
-                    try
-                    {
-                        // Attempt to connect
-                        await tcpClient.ConnectAsync(_remoteHost, _remotePort).ConfigureAwait(false);
-                        remoteStream = (Stream)tcpClient.GetStream();
-                    }
-                    catch (Exception exc)
-                    {
-                        Console.WriteLine($"[{socket.LocalEndPoint}] - Unable to connect to {_remoteHost}:{_remotePort} ({swConnection.ElapsedMilliseconds}ms): {exc.Message}");
-                        return;
-                    }
-
-                    // We're connected
-                    Console.WriteLine($"[{socket.LocalEndPoint}] - Connected to {_remoteHost}:{_remotePort} ({swConnection.ElapsedMilliseconds}ms)");
-
-                    if (DecryptSsl)
-                    {
-                        // Create the SSL stream with certificate validation
-                        var remoteSslStream = new SslStream(remoteStream, false, (sender, certificate, chain, errors) =>
-                        {
-                            // No need for checking if there are no errors
-                            if (errors == SslPolicyErrors.None)
-                                return true;
-
-                            // Log warning
-                            Console.WriteLine($"[{socket.LocalEndPoint}] - Certificate with subject '{certificate.Subject}' has error {errors}.");
-                            return IgnoreCertificateErrors;
-                        });
-                        await remoteSslStream.AuthenticateAsClientAsync(_sslIdentification ?? _remoteHost);
-
-                        // Use the SSL stream
-                        remoteStream = remoteSslStream;
-                    }
-
-                    // Wait until the streams have completed
-                    try
-                    {
                     await Task.WhenAny(
-                        localStream.CopyToAsync(remoteStream, copyBlockSize, cancellationToken),
-                        remoteStream.CopyToAsync(localStream, copyBlockSize, cancellationToken)).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        // Expected to fail sometimes
-                    }
-
-                    // Log warning
-                    Console.WriteLine($"[{socket.LocalEndPoint}] - Closed connection ({swConnection.ElapsedMilliseconds}ms).");
+                            localStream.CopyToAsync(remoteStream, copyBlockSize, cancellationToken),
+                            remoteStream.CopyToAsync(localStream, copyBlockSize, cancellationToken))
+                        .ConfigureAwait(false);
                 }
+                catch (Exception exc)
+                {
+                    // Expected to fail sometimes
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.WriteLine(exc.ToString());
+                    Console.ResetColor();
+                }
+
+                // Log warning
+                Console.WriteLine($"[{socket.RemoteEndPoint} -> {socket.LocalEndPoint}] - Closed connection ({swConnection.ElapsedMilliseconds}ms).");
             }
         }
     }
